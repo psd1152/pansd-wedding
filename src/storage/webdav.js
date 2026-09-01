@@ -4,8 +4,11 @@
 // - Cloudflare Pages + R2：BASE 设为 /api/uploads/（npm run build:cf）
 
 const BASE = import.meta.env.VITE_UPLOAD_BASE || '/uploads/'
+// 互动接口（点赞/评论/排序）：Cloudflare 与本地模拟均提供 /api/meta/；
+// 纯 nginx 部署无此接口，操作时会提示失败，不影响上传与浏览
 
 const IMG_REG = /\.(jpe?g|png|webp|gif|bmp)$/i
+const META_BASE = import.meta.env.VITE_META_BASE || '/api/meta/'
 
 /**
  * 上传文件
@@ -79,7 +82,41 @@ export async function list() {
       url: BASE + i.name,
       time: parseMtime(i.mtime),
       size: i.size,
-      by: i.by || ''
+      by: i.by || '',
+      likes: i.likes || 0,
+      comments: i.comments || [],
+      order: i.order != null ? i.order : null
     }))
-    .sort((a, b) => b.time - a.time)
+    .sort((a, b) => sortKey(a) - sortKey(b))
+}
+
+// 排序权重：自定义 order 优先，否则按时间倒序（新照片在前）
+function sortKey(p) {
+  return p.order != null ? p.order : 1e15 - p.time
+}
+
+/**
+ * 互动接口：点赞 / 评论 / 排序，返回更新后的条目（排序时无）
+ * @param {string} name 文件名（排序时传 ''）
+ * @param {{action:string, [k:string]:any}} payload
+ */
+export async function metaAction(name, payload) {
+  const res = await fetch(META_BASE + name, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  if (!res.ok) {
+    let msg = '操作失败（' + res.status + '）'
+    try {
+      msg = (await res.text()) || msg
+    } catch {}
+    throw new Error(msg)
+  }
+  return res.json()
+}
+
+/** 保存新人自定义顺序：按序点选的文件名数组 */
+export async function saveOrder(names) {
+  return metaAction('', { action: 'order', names })
 }

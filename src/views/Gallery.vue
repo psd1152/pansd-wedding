@@ -64,20 +64,36 @@
         >
           <img :src="p.url" loading="lazy" alt="婚礼照片" />
           <span
-            v-if="owner && selecting"
+            v-if="owner && selecting && manageMode === 'select'"
             class="check"
             :class="{ on: selected.has(p.name) }"
           >✓</span>
-          <figcaption v-if="p.by" class="wall-by">{{ p.by }}</figcaption>
+          <span
+            v-if="owner && selecting && manageMode === 'order' && orderSeq.indexOf(p.name) >= 0"
+            class="order-badge"
+          >{{ orderSeq.indexOf(p.name) + 1 }}</span>
+          <figcaption v-if="p.by || p.likes" class="wall-by">
+            {{ p.by }}<span v-if="p.likes" class="wall-likes"> ❤{{ p.likes }}</span>
+          </figcaption>
         </figure>
       </div>
 
       <!-- 多选操作栏（仅新人管理模式） -->
-      <div v-if="owner && selecting" class="select-bar">
+      <div v-if="owner && selecting && manageMode === 'select'" class="select-bar">
         <button class="sb-btn" @click="toggleAll">{{ allSelected ? '取消全选' : '全选' }}</button>
         <span class="sb-count">已选 {{ selected.size }} 张</span>
+        <button class="sb-btn" @click="startOrder">排序</button>
         <button class="sb-btn" :disabled="!selected.size" @click="downloadSelected">下载</button>
         <button class="sb-btn danger" :disabled="!selected.size" @click="deleteSelected">删除</button>
+      </div>
+
+      <!-- 排序操作栏：按想要的顺序依次点照片 -->
+      <div v-else-if="owner && selecting" class="select-bar">
+        <span class="sb-count sb-tip">按想要的顺序点击照片（已排 {{ orderSeq.length }} 张，再点一次可移除）</span>
+        <button class="sb-btn" :disabled="!orderSeq.length || savingOrder" @click="saveOrderFn">
+          {{ savingOrder ? '保存中' : '保存顺序' }}
+        </button>
+        <button class="sb-btn" @click="cancelOrder">取消</button>
       </div>
 
       <!-- 大图预览 -->
@@ -90,10 +106,40 @@
             <span v-if="owner" class="lb-del" @click="removePhoto">删除</span>
             <span class="lb-close" @click="viewer.index = -1">关闭</span>
           </div>
-          <img :src="current.url" alt="大图预览" />
+          <img :src="current.url" alt="大图预览" @click="viewer.index = -1" />
           <div class="lb-nav">
             <button :disabled="viewer.index === 0" @click="viewer.index--">‹ 上一张</button>
+            <button
+              class="lb-like"
+              :class="{ liked: hasLiked(current.name) }"
+              @click="likePhoto"
+            >{{ hasLiked(current.name) ? '❤ 已赞' : '♡ 点赞' }}<span v-if="current.likes"> {{ current.likes }}</span></button>
             <button :disabled="viewer.index >= photos.length - 1" @click="viewer.index++">下一张 ›</button>
+          </div>
+
+          <!-- 留言区：所有人都能看到、都能写 -->
+          <div class="lb-comments">
+            <div v-if="!(current.comments || []).length" class="cm-empty">还没有留言，写下第一句祝福吧</div>
+            <div v-for="(c, ci) in current.comments" :key="ci" class="cm-item">
+              <span class="cm-by">{{ c.by }}：</span>{{ c.text }}
+            </div>
+            <div class="cm-form">
+              <input
+                v-if="!commentBy"
+                v-model.trim="commentByDraft"
+                class="cm-name"
+                maxlength="12"
+                placeholder="您的名字"
+              />
+              <input
+                v-model.trim="commentText"
+                class="cm-text"
+                maxlength="200"
+                placeholder="写下祝福…"
+                @keyup.enter="sendComment"
+              />
+              <button class="cm-send" :disabled="sendingComment" @click="sendComment">{{ sendingComment ? '…' : '发送' }}</button>
+            </div>
           </div>
         </div>
       </transition>
@@ -150,9 +196,12 @@ watch(authed, (v) => v && load(), { immediate: true })
 const viewer = reactive({ index: -1 })
 const current = computed(() => photos.value[viewer.index] || {})
 
-// ---- 管理模式：多选后批量删除/下载（仅新人） ----
+// ---- 管理模式：多选后批量删除/下载，或按序点选调整顺序（仅新人） ----
 const selecting = ref(false)
 const selected = ref(new Set())
+const manageMode = ref('select') // select=多选 | order=排序
+const orderSeq = ref([]) // 排序模式下按点击顺序记录的文件名
+const savingOrder = ref(false)
 
 const allSelected = computed(
   () => photos.value.length > 0 && selected.value.size === photos.value.length
@@ -161,6 +210,41 @@ const allSelected = computed(
 function toggleSelecting() {
   selecting.value = !selecting.value
   selected.value = new Set()
+  manageMode.value = 'select'
+  orderSeq.value = []
+}
+
+function startOrder() {
+  manageMode.value = 'order'
+  selected.value = new Set()
+  orderSeq.value = []
+}
+
+function cancelOrder() {
+  manageMode.value = 'select'
+  orderSeq.value = []
+}
+
+function toggleOrder(p) {
+  const arr = orderSeq.value.slice()
+  const at = arr.indexOf(p.name)
+  if (at >= 0) arr.splice(at, 1)
+  else arr.push(p.name)
+  orderSeq.value = arr
+}
+
+async function saveOrderFn() {
+  if (!orderSeq.value.length) return
+  savingOrder.value = true
+  try {
+    await storage.saveOrder(orderSeq.value)
+    await load()
+    toggleSelecting() // 保存成功后退出管理
+  } catch (err) {
+    window.alert(err.message || '保存顺序失败')
+  } finally {
+    savingOrder.value = false
+  }
 }
 
 function toggleSelect(p) {
@@ -177,8 +261,12 @@ function toggleAll() {
 }
 
 function onWallClick(p, i) {
-  if (props.owner && selecting.value) toggleSelect(p)
-  else viewer.index = i
+  if (props.owner && selecting.value) {
+    if (manageMode.value === 'order') toggleOrder(p)
+    else toggleSelect(p)
+  } else {
+    viewer.index = i
+  }
 }
 
 async function deleteSelected() {
@@ -212,6 +300,66 @@ function downloadSelected() {
       a.click()
       a.remove()
     }, i * 400)
+  })
+}
+
+// ---- 点赞（每设备限一次，本机记录） ----
+const likedSet = ref(new Set(JSON.parse(localStorage.getItem('wedding-liked') || '[]')))
+
+function hasLiked(name) {
+  return !!name && likedSet.value.has(name)
+}
+
+async function likePhoto() {
+  const p = current.value
+  if (!p.name || hasLiked(p.name)) return
+  try {
+    const res = await storage.metaAction(p.name, { action: 'like' })
+    applyEntry(res.entry)
+    likedSet.value.add(p.name)
+    localStorage.setItem('wedding-liked', JSON.stringify(Array.from(likedSet.value)))
+  } catch (err) {
+    window.alert(err.message || '点赞失败')
+  }
+}
+
+// ---- 留言 ----
+const commentBy = ref(localStorage.getItem('wedding-guest-name') || '')
+const commentByDraft = ref('')
+const commentText = ref('')
+const sendingComment = ref(false)
+
+async function sendComment() {
+  const p = current.value
+  if (!p.name || !commentText.value) return
+  const by = commentBy.value || commentByDraft.value
+  if (!by) {
+    window.alert('请先填写您的名字')
+    return
+  }
+  sendingComment.value = true
+  try {
+    const res = await storage.metaAction(p.name, { action: 'comment', by, text: commentText.value })
+    applyEntry(res.entry)
+    commentText.value = ''
+    commentBy.value = by
+    localStorage.setItem('wedding-guest-name', by)
+  } catch (err) {
+    window.alert(err.message || '留言失败')
+  } finally {
+    sendingComment.value = false
+  }
+}
+
+// 用服务端返回的条目刷新列表中的对应照片（赞数/留言/顺序）
+function applyEntry(entry) {
+  const i = photos.value.findIndex((p) => p.name === entry.name)
+  if (i < 0) return
+  const p = photos.value[i]
+  photos.value[i] = Object.assign({}, p, {
+    likes: entry.likes,
+    comments: entry.comments,
+    order: entry.order != null ? entry.order : p.order
   })
 }
 
@@ -408,22 +556,25 @@ watch(
   cursor: pointer;
 }
 
-/* ---- 照片墙（瀑布流） ---- */
+/* ---- 照片墙（每行 4 张网格） ---- */
 .wall {
-  columns: 3 180px;
-  column-gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
   padding: 14px 16px;
 }
 
 .wall-item {
   position: relative;
-  break-inside: avoid;
-  margin: 0 0 8px;
+  aspect-ratio: 1; /* 统一方形，行列整齐 */
+  margin: 0;
   cursor: pointer;
 }
 
 .wall-item img {
   width: 100%;
+  height: 100%;
+  object-fit: cover;
   display: block;
   border-radius: 10px;
   background: var(--line);
@@ -476,6 +627,27 @@ watch(
   color: #fff;
 }
 
+.order-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: #fff;
+  font-size: 12px;
+  line-height: 22px;
+  text-align: center;
+}
+
+.wall-likes {
+  color: #ffd7d0;
+  margin-left: 6px;
+}
+
 /* ---- 多选操作栏 ---- */
 .select-bar {
   position: fixed;
@@ -516,6 +688,11 @@ watch(
 .sb-btn.danger {
   border-color: var(--red);
   color: var(--red);
+}
+
+.sb-tip {
+  text-align: left;
+  font-size: 12px;
 }
 
 /* ---- 大图预览 ---- */
@@ -560,6 +737,7 @@ watch(
   min-height: 0;
   object-fit: contain;
   padding: 0 12px;
+  cursor: pointer; /* 点击大图返回列表 */
 }
 
 .lb-nav {
@@ -580,5 +758,86 @@ watch(
 
 .lb-nav button:disabled {
   opacity: 0.3;
+}
+
+.lb-like {
+  border-color: var(--rose) !important;
+  color: #f2c9c2 !important;
+}
+
+.lb-like.liked {
+  background: rgba(212, 165, 165, 0.25);
+}
+
+/* ---- 留言区 ---- */
+.lb-comments {
+  max-height: 26vh;
+  overflow-y: auto;
+  padding: 6px 18px 18px;
+  color: #e8ddcd;
+  font-size: 13px;
+}
+
+.cm-empty {
+  color: rgba(232, 221, 205, 0.55);
+  text-align: center;
+  padding: 4px 0 10px;
+}
+
+.cm-item {
+  padding: 5px 0;
+  border-top: 1px solid rgba(232, 221, 205, 0.14);
+  word-break: break-all;
+}
+
+.cm-by {
+  color: var(--rose);
+}
+
+.cm-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.cm-name {
+  width: 82px;
+  flex-shrink: 0;
+}
+
+.cm-name,
+.cm-text {
+  padding: 8px 10px;
+  border: 1px solid rgba(232, 221, 205, 0.35);
+  border-radius: 8px;
+  background: transparent;
+  color: #f5eee2;
+  font-size: 13px;
+  outline: none;
+}
+
+.cm-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.cm-name::placeholder,
+.cm-text::placeholder {
+  color: rgba(232, 221, 205, 0.45);
+}
+
+.cm-send {
+  flex-shrink: 0;
+  padding: 0 16px;
+  border: none;
+  border-radius: 8px;
+  background: var(--gold);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cm-send:disabled {
+  opacity: 0.5;
 }
 </style>

@@ -13,6 +13,11 @@
 const IMG_REG = /\.(jpe?g|png|webp|gif|bmp)$/i
 const INDEX_KEY = '__index__'
 
+// 排序权重：order 越小越靠前；未自定义顺序的按时间倒序（新照片在前）
+function sortKey(e) {
+  return e.order != null ? e.order : 1e15 - e.time
+}
+
 async function readIndex(kv) {
   try {
     return (await kv.get(INDEX_KEY, 'json')) || []
@@ -65,7 +70,19 @@ async function handle(context) {
     await kv.put(name, body, { metadata: meta })
     // 更新索引（婚礼并发量低，读-改-写足够）
     const index = await readIndex(kv)
-    index.push({ name, time: meta.time, size: meta.size, by: meta.by })
+    // 新照片排在最前（order = 当前最小排序权重 - 1）
+    const minOrder = index.length
+      ? Math.min.apply(null, index.map(sortKey))
+      : 0
+    index.push({
+      name,
+      time: meta.time,
+      size: meta.size,
+      by: meta.by,
+      likes: 0,
+      comments: [],
+      order: minOrder - 1
+    })
     await kv.put(INDEX_KEY, JSON.stringify(index))
     return new Response(null, { status: 201 })
   }
@@ -88,6 +105,9 @@ async function handle(context) {
         mtime: new Date(i.time).toISOString(),
         size: i.size,
         by: i.by || '',
+        likes: i.likes || 0,
+        comments: i.comments || [],
+        order: i.order != null ? i.order : null,
         type: 'file'
       }))
     return new Response(JSON.stringify(items), {
