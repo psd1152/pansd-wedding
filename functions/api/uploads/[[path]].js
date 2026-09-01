@@ -40,8 +40,8 @@ async function handle(context) {
     )
   }
 
-  // catch-all 参数：列表请求时为 '' 或 undefined
-  const name = (params.path || '').replace(/^\/+/, '')
+  // catch-all 参数：文件名是数组形式 ['xxx.jpg']，列表请求时为空数组 []
+  const name = (params.path || []).join('/').replace(/^\/+/, '')
 
   // 上传
   if (request.method === 'PUT') {
