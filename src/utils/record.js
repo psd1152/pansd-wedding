@@ -26,3 +26,10 @@ export function addRecord(record) {
   saveRecords(list)
   return list
 }
+
+/** 按文件名移除记录（宾客撤回后本地同步清理），返回最新列表 */
+export function removeRecord(name) {
+  const list = getRecords().filter((r) => r.name !== name)
+  saveRecords(list)
+  return list
+}

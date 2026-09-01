@@ -6,7 +6,7 @@
         <div class="card lock-card">
           <div class="lock-icon serif">囍</div>
           <h2 class="lock-title">新人相册</h2>
-          <p class="lock-tip">请输入密码查看婚礼全部照片</p>
+          <p class="lock-tip">请输入密码管理婚礼全部照片</p>
           <input
             v-model="pwd"
             class="lock-input"

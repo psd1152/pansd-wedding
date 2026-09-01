@@ -24,8 +24,17 @@
       <p class="slogan">{{ config.slogan }}</p>
     </header>
 
+    <!-- 轮播图（随机顺序，每张 3 秒自动切换，可手动切换） -->
+    <Carousel />
+
     <!-- 选择与上传 -->
     <section class="card">
+      <!-- 双入口：宾客相册 / 新人入口 -->
+      <div class="entries">
+        <router-link to="/gallery" class="entry-link serif">宾客相册</router-link>
+        <span class="entry-dot">·</span>
+        <router-link to="/owner" class="entry-link serif">新人入口</router-link>
+      </div>
       <!-- 来宾签名：让新人知道祝福来自谁 -->
       <label class="name-label" for="guestName">您的名字</label>
       <input
@@ -89,7 +98,7 @@
       </div>
     </section>
 
-    <!-- 我的上传记录 -->
+    <!-- 我的上传记录（可撤回，防误上传） -->
     <section v-if="records.length" class="card">
       <h3 class="sec-title">我的上传记录</h3>
       <div class="record-list">
@@ -99,15 +108,14 @@
             <span class="t">{{ formatTime(r.time) }}</span>
             <span class="st" :class="r.status">{{ r.status === 'success' ? '已上传' : '未成功' }}</span>
           </div>
+          <button v-if="r.status === 'success'" class="recall" @click="recall(r)">撤回</button>
         </div>
       </div>
+      <p class="recall-tip">传错了？点"撤回"删除这张照片，防止误上传</p>
     </section>
 
-    <footer class="footer">
-      <router-link to="/gallery" class="entry-link serif">宾客相册</router-link>
-      <span class="entry-dot">·</span>
-      <router-link to="/owner" class="entry-link serif">新人入口</router-link>
-    </footer>
+    <!-- 背景音乐（Web Audio 合成，首次点击页面自动响起） -->
+    <BgMusic />
   </div>
 </template>
 
@@ -116,7 +124,9 @@ import { ref, computed, onMounted } from 'vue'
 import config from '../config'
 import { storage } from '../storage'
 import { compressImage, genFileName } from '../utils/compress'
-import { getRecords, addRecord } from '../utils/record'
+import { getRecords, addRecord, removeRecord } from '../utils/record'
+import Carousel from '../components/Carousel.vue'
+import BgMusic from '../components/BgMusic.vue'
 
 const items = ref([]) // {id, file, previewUrl, status, progress}
 const uploading = ref(false)
@@ -223,6 +233,18 @@ function formatTime(ts) {
   const d = new Date(ts)
   const p = (n) => String(n).padStart(2, '0')
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+// 撤回：删除自己误传的照片（本地记录同步清理）
+async function recall(r) {
+  if (!window.confirm('确定撤回这张照片吗？撤回后相册里也会同步删除。')) return
+  try {
+    await storage.remove(r.name)
+    records.value = removeRecord(r.name)
+    banner.value = { type: 'ok', text: '已撤回，照片已从相册移除' }
+  } catch (err) {
+    window.alert(err.message || '撤回失败，请重试')
+  }
 }
 </script>
 
@@ -540,10 +562,33 @@ function formatTime(ts) {
   color: var(--red);
 }
 
-/* ---- 页脚 ---- */
-.footer {
+/* ---- 撤回按钮 ---- */
+.recall {
+  margin-left: auto;
+  padding: 5px 12px;
+  border: 1px solid var(--red);
+  border-radius: 8px;
+  background: none;
+  color: var(--red);
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.recall:active {
+  background: #fdf0ee;
+}
+
+.recall-tip {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ink-light);
+}
+
+/* ---- 双入口 ---- */
+.entries {
   text-align: center;
-  margin-top: 26px;
+  margin-bottom: 14px;
 }
 
 .entry-link {

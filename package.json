@@ -3,9 +3,10 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "build:cf": "vite build --mode cloudflare",
+    "gen:imgs": "node scripts/gen-imgs-manifest.js",
+    "dev": "npm run gen:imgs && vite",
+    "build": "npm run gen:imgs && vite build",
+    "build:cf": "npm run gen:imgs && vite build --mode cloudflare",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -15,6 +16,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^2.3.4",
+    "jimp": "^0.16.13",
     "vite": "^2.9.18"
   }
 }
