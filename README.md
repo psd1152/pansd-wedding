@@ -90,7 +90,7 @@ nginx -t && nginx -s reload
 | --- | --- | --- |
 | 静态托管 | Pages | 无限请求 |
 | nginx WebDAV 接收上传 | Pages Functions（`functions/` 目录） | 10万请求/天 |
-| `uploads/` 目录 | R2 对象存储 | 10GB 存储、无流量费 |
+| `uploads/` 目录 | KV 键值存储（**无需绑卡**） | 1GB 存储、1千次写/天 |
 
 ### 部署步骤（GitHub + Pages，无需本地装新工具）
 
@@ -101,8 +101,8 @@ nginx -t && nginx -s reload
    - Build command：`npm run build:cf`
    - Build output directory：`dist`
    - 注意 `functions/` 目录会随仓库一起被自动识别部署；
-4. 创建 R2 存储桶：左侧菜单 R2 → Create bucket，名字随意（如 `wedding-photos`）；
-5. 给 Pages 项目绑定 R2：项目 → Settings → Functions → R2 bucket bindings → Add binding，**变量名填 `PHOTOS`**，选刚才的存储桶；
+4. 创建 KV 命名空间：左侧菜单 Workers & Pages → KV → Create a namespace，名字随意（如 `wedding-photos`），**不需要绑卡**；
+5. 给 Pages 项目绑定 KV：项目 → Settings → Functions → KV namespace bindings → Add binding，**变量名填 `PHOTOS`**，选刚创建的命名空间；
 6. 重新触发一次部署（Deployments → Retry deployment），完成后访问分配的 `xxx.pages.dev` 域名。
 
 验证：打开 `站点地址/#/gallery` 输密码进相册，上传几张照片后刷新，能看到即全部打通。
@@ -111,8 +111,9 @@ nginx -t && nginx -s reload
 ### 备注
 
 - `build:cf` 会把上传接口指向 `/api/uploads/`（Pages Function），普通 `build` 仍指向 `/uploads/`（nginx），两套部署互不影响；
-- 如习惯用命令行，也可用 `wrangler pages deploy`（需 Node ≥ 16.13），并在 Pages 项目设置里同样绑定 R2；
-- 免费额度对婚礼场景绰绰有余；若担心，可在 R2 设置里开启用量告警。
+- 如习惯用命令行，也可用 `wrangler pages deploy`（需 Node ≥ 16.13），并在 Pages 项目设置里同样绑定 KV；
+- 存储选型说明：R2 需要绑定信用卡，改用 KV 后完全免费；婚礼几百张压缩照片约 100MB，远小于 KV 免费 1GB；每天 1000 次写入额度也够用（每张照片占 2 次写入：图片本身 + 索引）；
+- 婚礼后可在 KV 面板逐张下载留档，或提前联系摄影师备份。
 
 ## 常见问题
 
