@@ -20,10 +20,24 @@ async function readIndex(kv) {
 }
 
 export async function onRequest(context) {
+  try {
+    return await handle(context)
+  } catch (e) {
+    // 把真实异常回显给前端，方便定位（婚礼站点可接受）
+    return new Response('服务器异常: ' + e.message, { status: 500 })
+  }
+}
+
+async function handle(context) {
   const { request, params, env } = context
   const kv = env.PHOTOS
-  if (!kv) {
-    return new Response('KV 未绑定（变量名 PHOTOS）', { status: 500 })
+  // 校验绑定类型：必须是 KV 命名空间，而不是同名纯文本变量/密钥
+  if (!kv || typeof kv.put !== 'function') {
+    return new Response(
+      'PHOTOS 绑定无效：请到项目 Settings → Functions → KV namespace bindings 里' +
+      '绑定 KV 命名空间（变量名 PHOTOS），而不是加在 Environment variables 里',
+      { status: 500 }
+    )
   }
 
   // catch-all 参数：列表请求时为 '' 或 undefined
