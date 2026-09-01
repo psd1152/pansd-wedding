@@ -1,0 +1,20 @@
+{
+  "name": "wedding-pic-upload",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:cf": "vite build --mode cloudflare",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "vue": "3.2.47",
+    "vue-router": "^4.1.6"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^2.3.4",
+    "vite": "^2.9.18"
+  }
+}
