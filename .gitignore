@@ -4,3 +4,4 @@ uploads
 .env.local
 .DS_Store
 test-put.js
+test-mock.js

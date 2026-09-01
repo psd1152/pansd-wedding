@@ -12,9 +12,10 @@ const IMG_REG = /\.(jpe?g|png|webp|gif|bmp)$/i
  * @param {Blob} blob 已压缩的图片数据
  * @param {string} name 文件名
  * @param {(p:number)=>void} onProgress 进度回调 0~1
+ * @param {{uploader?:string}} meta 附加信息（上传人姓名，仅 CF 接口会保存）
  * @returns {Promise<{url:string}>}
  */
-export function upload(blob, name, onProgress) {
+export function upload(blob, name, onProgress, meta) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('PUT', BASE + name)
@@ -33,8 +34,22 @@ export function upload(blob, name, onProgress) {
     xhr.ontimeout = () => reject(new Error('上传超时，请重试'))
     xhr.timeout = 120000
     xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+    if (meta && meta.uploader) {
+      xhr.setRequestHeader('X-Uploader', encodeURIComponent(meta.uploader))
+    }
     xhr.send(blob)
   })
+}
+
+/**
+ * 删除照片（新人相册）：CF 接口支持；nginx 需开 dav_methods DELETE
+ * @returns {Promise<void>}
+ */
+export async function remove(name) {
+  const res = await fetch(BASE + name, { method: 'DELETE' })
+  if (res.status !== 204 && res.status !== 200) {
+    throw new Error('删除失败（' + res.status + '）')
+  }
 }
 
 /**
@@ -63,7 +78,8 @@ export async function list() {
       name: i.name,
       url: BASE + i.name,
       time: parseMtime(i.mtime),
-      size: i.size
+      size: i.size,
+      by: i.by || ''
     }))
     .sort((a, b) => b.time - a.time)
 }

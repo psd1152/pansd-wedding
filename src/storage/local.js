@@ -35,14 +35,20 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms))
  * @param {Blob} blob
  * @param {string} name
  * @param {(p:number)=>void} onProgress
+ * @param {{uploader?:string}} meta
  * @returns {Promise<{url:string}>}
  */
-export async function upload(blob, name, onProgress) {
+export async function upload(blob, name, onProgress, meta) {
   onProgress && onProgress(0.15)
   const db = await openDB()
   await new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite')
-    tx.objectStore(STORE).put({ name, blob, time: Date.now() })
+    tx.objectStore(STORE).put({
+      name,
+      blob,
+      time: Date.now(),
+      by: (meta && meta.uploader) || ''
+    })
     tx.oncomplete = resolve
     tx.onerror = () => reject(tx.error)
   })
@@ -51,6 +57,18 @@ export async function upload(blob, name, onProgress) {
   await delay(150)
   onProgress && onProgress(1)
   return { url: getUrl(name, blob) }
+}
+
+/** 删除照片 */
+export async function remove(name) {
+  const db = await openDB()
+  urlCache.delete(name)
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite')
+    tx.objectStore(STORE).delete(name)
+    tx.oncomplete = resolve
+    tx.onerror = () => reject(tx.error)
+  })
 }
 
 /**
@@ -68,7 +86,8 @@ export async function list() {
       name: r.name,
       url: getUrl(r.name, r.blob),
       time: r.time,
-      size: r.blob.size
+      size: r.blob.size,
+      by: r.by || ''
     }))
     .sort((a, b) => b.time - a.time)
 }

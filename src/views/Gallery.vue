@@ -1,7 +1,7 @@
 <template>
-  <div class="page">
-    <!-- 密码门槛 -->
-    <template v-if="!authed">
+  <div class="page" :class="{ selecting: owner && selecting }">
+    <!-- 新人入口：密码门槛 -->
+    <template v-if="owner && !authed">
       <div class="lock-wrap">
         <div class="card lock-card">
           <div class="lock-icon serif">囍</div>
@@ -25,16 +25,21 @@
     <template v-else>
       <header class="g-header">
         <div>
-          <h1 class="g-title serif">{{ config.groom }} &amp; {{ config.bride }} 的婚礼相册</h1>
+          <h1 class="g-title serif">{{ config.groom }} &amp; {{ config.bride }} {{ owner ? '的新人相册' : '的婚礼照片墙' }}</h1>
           <div class="g-sub">共 {{ photos.length }} 张照片</div>
         </div>
-        <button class="refresh" :disabled="loading" @click="load">
-          {{ loading ? '加载中' : '刷新' }}
-        </button>
+        <div class="g-actions">
+          <button class="refresh" :disabled="loading" @click="load">
+            {{ loading ? '加载中' : '刷新' }}
+          </button>
+          <button v-if="owner" class="refresh" @click="toggleSelecting">
+            {{ selecting ? '退出管理' : '管理' }}
+          </button>
+        </div>
       </header>
 
-      <!-- 现场二维码 -->
-      <section class="card qr-card">
+      <!-- 现场二维码（仅新人可见） -->
+      <section v-if="owner" class="card qr-card">
         <canvas ref="qrCanvas"></canvas>
         <div class="qr-info">
           <div class="qr-title">现场二维码</div>
@@ -51,14 +56,28 @@
       </div>
       <div v-else-if="!photos.length" class="state">还没有照片，等待宾客的第一份祝福吧</div>
       <div v-else class="wall">
-        <img
+        <figure
           v-for="(p, i) in photos"
           :key="p.name"
-          :src="p.url"
-          loading="lazy"
-          alt="婚礼照片"
-          @click="viewer.index = i"
-        />
+          class="wall-item"
+          @click="onWallClick(p, i)"
+        >
+          <img :src="p.url" loading="lazy" alt="婚礼照片" />
+          <span
+            v-if="owner && selecting"
+            class="check"
+            :class="{ on: selected.has(p.name) }"
+          >✓</span>
+          <figcaption v-if="p.by" class="wall-by">{{ p.by }}</figcaption>
+        </figure>
+      </div>
+
+      <!-- 多选操作栏（仅新人管理模式） -->
+      <div v-if="owner && selecting" class="select-bar">
+        <button class="sb-btn" @click="toggleAll">{{ allSelected ? '取消全选' : '全选' }}</button>
+        <span class="sb-count">已选 {{ selected.size }} 张</span>
+        <button class="sb-btn" :disabled="!selected.size" @click="downloadSelected">下载</button>
+        <button class="sb-btn danger" :disabled="!selected.size" @click="deleteSelected">删除</button>
       </div>
 
       <!-- 大图预览 -->
@@ -66,7 +85,9 @@
         <div v-if="viewer.index >= 0" class="lightbox" @click.self="viewer.index = -1">
           <div class="lb-bar">
             <span>{{ viewer.index + 1 }} / {{ photos.length }}</span>
+            <span v-if="current.by" class="lb-by">来自 {{ current.by }}</span>
             <a :href="current.url" download target="_blank">下载</a>
+            <span v-if="owner" class="lb-del" @click="removePhoto">删除</span>
             <span class="lb-close" @click="viewer.index = -1">关闭</span>
           </div>
           <img :src="current.url" alt="大图预览" />
@@ -86,10 +107,14 @@ import QRCode from 'qrcode'
 import config from '../config'
 import { storage } from '../storage'
 
+const props = defineProps({
+  owner: { type: Boolean, default: false } // 新人模式：密码门槛 + 删除权限 + 二维码
+})
+
 const AUTH_KEY = 'wedding-owner-authed'
 
-// ---- 密码门槛 ----
-const authed = ref(sessionStorage.getItem(AUTH_KEY) === '1')
+// ---- 密码门槛（仅新人模式；宾客直接进入） ----
+const authed = ref(!props.owner || sessionStorage.getItem(AUTH_KEY) === '1')
 const pwd = ref('')
 const lockError = ref(false)
 
@@ -124,6 +149,85 @@ watch(authed, (v) => v && load(), { immediate: true })
 // ---- 大图预览 ----
 const viewer = reactive({ index: -1 })
 const current = computed(() => photos.value[viewer.index] || {})
+
+// ---- 管理模式：多选后批量删除/下载（仅新人） ----
+const selecting = ref(false)
+const selected = ref(new Set())
+
+const allSelected = computed(
+  () => photos.value.length > 0 && selected.value.size === photos.value.length
+)
+
+function toggleSelecting() {
+  selecting.value = !selecting.value
+  selected.value = new Set()
+}
+
+function toggleSelect(p) {
+  const s = new Set(selected.value)
+  if (s.has(p.name)) s.delete(p.name)
+  else s.add(p.name)
+  selected.value = s
+}
+
+function toggleAll() {
+  selected.value = allSelected.value
+    ? new Set()
+    : new Set(photos.value.map((p) => p.name))
+}
+
+function onWallClick(p, i) {
+  if (props.owner && selecting.value) toggleSelect(p)
+  else viewer.index = i
+}
+
+async function deleteSelected() {
+  const names = Array.from(selected.value)
+  if (!names.length) return
+  if (!window.confirm('确定删除所选 ' + names.length + ' 张照片吗？删除后无法恢复')) return
+  const failed = new Set()
+  for (const name of names) {
+    try {
+      await storage.remove(name)
+    } catch (e) {
+      failed.add(name)
+    }
+  }
+  photos.value = photos.value.filter((p) => !selected.value.has(p.name) || failed.has(p.name))
+  if (failed.size) window.alert(failed.size + ' 张删除失败，请重试')
+  selected.value = new Set()
+  selecting.value = false
+}
+
+// 批量下载：逐张触发保存，间隔 400ms 避免浏览器拦截
+function downloadSelected() {
+  const targets = photos.value.filter((p) => selected.value.has(p.name))
+  targets.forEach((p, i) => {
+    setTimeout(() => {
+      const a = document.createElement('a')
+      a.href = p.url
+      a.download = p.name
+      a.target = '_blank'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    }, i * 400)
+  })
+}
+
+// ---- 删除照片（仅新人） ----
+async function removePhoto() {
+  const p = current.value
+  if (!p.name) return
+  if (!window.confirm('确定删除这张照片吗？删除后无法恢复')) return
+  try {
+    await storage.remove(p.name)
+    photos.value = photos.value.filter((x) => x.name !== p.name)
+    viewer.index = -1
+  } catch (err) {
+    window.alert(err.message || '删除失败')
+  }
+}
 
 // ---- 二维码 ----
 const qrCanvas = ref(null)
@@ -311,14 +415,107 @@ watch(
   padding: 14px 16px;
 }
 
-.wall img {
+.wall-item {
+  position: relative;
+  break-inside: avoid;
+  margin: 0 0 8px;
+  cursor: pointer;
+}
+
+.wall-item img {
   width: 100%;
   display: block;
   border-radius: 10px;
-  margin-bottom: 8px;
-  break-inside: avoid;
-  cursor: pointer;
   background: var(--line);
+}
+
+.wall-by {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 16px 10px 5px;
+  border-radius: 0 0 10px 10px;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.55));
+  color: #fff;
+  font-size: 12px;
+  text-align: right;
+  pointer-events: none;
+}
+
+/* ---- 管理模式：多选 ---- */
+.page.selecting {
+  padding-bottom: 86px; /* 给底部操作栏让位 */
+}
+
+.g-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid #fff;
+  background: rgba(0, 0, 0, 0.35);
+  color: transparent;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.check.on {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #fff;
+}
+
+/* ---- 多选操作栏 ---- */
+.select-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, 0.96);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -4px 16px rgba(176, 141, 87, 0.12);
+}
+
+.sb-count {
+  flex: 1;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-light);
+}
+
+.sb-btn {
+  padding: 8px 14px;
+  border: 1px solid var(--gold);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--gold-deep);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sb-btn:disabled {
+  opacity: 0.4;
+}
+
+.sb-btn.danger {
+  border-color: var(--red);
+  color: var(--red);
 }
 
 /* ---- 大图预览 ---- */
@@ -342,6 +539,15 @@ watch(
 
 .lb-bar a {
   color: #e8ddcd;
+}
+
+.lb-by {
+  color: var(--rose);
+}
+
+.lb-del {
+  color: #e8927c;
+  cursor: pointer;
 }
 
 .lb-close {

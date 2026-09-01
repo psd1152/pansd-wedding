@@ -1,5 +1,21 @@
 <template>
   <div class="page">
+    <!-- 喜庆飘落动画（玫瑰 / 爱心 / 花瓣） -->
+    <div class="petals" aria-hidden="true">
+      <span
+        v-for="(p, i) in petals"
+        :key="i"
+        class="petal"
+        :style="{
+          left: p.left,
+          animationDuration: p.dur,
+          animationDelay: p.delay,
+          fontSize: p.size,
+          opacity: p.opacity
+        }"
+      >{{ p.icon }}</span>
+    </div>
+
     <!-- 婚礼主题头部 -->
     <header class="hero">
       <div class="ring">♥</div>
@@ -10,6 +26,15 @@
 
     <!-- 选择与上传 -->
     <section class="card">
+      <!-- 来宾签名：让新人知道祝福来自谁 -->
+      <label class="name-label" for="guestName">您的名字</label>
+      <input
+        id="guestName"
+        v-model="uploader"
+        class="name-input"
+        maxlength="12"
+        placeholder="留下名字，让新人知道祝福来自谁"
+      />
       <input
         ref="fileInput"
         type="file"
@@ -79,13 +104,15 @@
     </section>
 
     <footer class="footer">
-      <router-link to="/gallery" class="owner-link serif">新人入口</router-link>
+      <router-link to="/gallery" class="entry-link serif">宾客相册</router-link>
+      <span class="entry-dot">·</span>
+      <router-link to="/owner" class="entry-link serif">新人入口</router-link>
     </footer>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import config from '../config'
 import { storage } from '../storage'
 import { compressImage, genFileName } from '../utils/compress'
@@ -96,6 +123,23 @@ const uploading = ref(false)
 const banner = ref(null)
 const records = ref(getRecords())
 let uid = 0
+
+// 来宾签名：记住上次填过的名字，宾客二次上传免重复输入
+const uploader = ref(localStorage.getItem('wedding-guest-name') || '')
+
+// 飘落动画元素：随机生成，纯 CSS 驱动，不引第三方库
+const PETAL_ICONS = ['🌹', '❤', '✿', '❀', '♥']
+const petals = ref([])
+onMounted(() => {
+  petals.value = Array.from({ length: 16 }, () => ({
+    left: Math.random() * 100 + '%',
+    dur: 7 + Math.random() * 8 + 's',
+    delay: -Math.random() * 15 + 's', // 负延迟让进场时已处于飘落中途
+    size: 12 + Math.random() * 14 + 'px',
+    opacity: 0.35 + Math.random() * 0.4,
+    icon: PETAL_ICONS[Math.floor(Math.random() * PETAL_ICONS.length)]
+  }))
+})
 
 const pendingCount = computed(() =>
   items.value.filter((i) => i.status === 'pending' || i.status === 'failed').length
@@ -138,9 +182,14 @@ async function uploadOne(it) {
   try {
     const blob = await compressImage(it.file)
     const name = genFileName()
-    const { url } = await storage.upload(blob, name, (p) => {
-      it.progress = Math.round(p * 100)
-    })
+    const { url } = await storage.upload(
+      blob,
+      name,
+      (p) => {
+        it.progress = Math.round(p * 100)
+      },
+      { uploader: uploader.value }
+    )
     it.status = 'success'
     it.progress = 100
     records.value = addRecord({ name, url, time: Date.now(), status: 'success' })
@@ -152,6 +201,11 @@ async function uploadOne(it) {
 }
 
 async function uploadAll() {
+  if (!uploader.value.trim()) {
+    banner.value = { type: 'warn', text: '请先填写您的名字，让新人知道这份祝福来自谁' }
+    return
+  }
+  localStorage.setItem('wedding-guest-name', uploader.value.trim())
   uploading.value = true
   banner.value = null
   const targets = items.value.filter((i) => i.status === 'pending' || i.status === 'failed')
@@ -174,9 +228,40 @@ function formatTime(ts) {
 
 <style scoped>
 .page {
+  position: relative;
+  z-index: 1;
   max-width: 560px;
   margin: 0 auto;
   padding-bottom: 30px;
+}
+
+/* ---- 喜庆飘落动画 ---- */
+.petals {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.petal {
+  position: absolute;
+  top: -6%;
+  animation-name: petal-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@keyframes petal-fall {
+  0% {
+    transform: translateY(-4vh) translateX(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(50vh) translateX(6vw) rotate(180deg);
+  }
+  100% {
+    transform: translateY(110vh) translateX(-3vw) rotate(360deg);
+  }
 }
 
 /* ---- 头部 ---- */
@@ -197,6 +282,51 @@ function formatTime(ts) {
   justify-content: center;
   color: var(--gold);
   font-size: 20px;
+  animation: heartbeat 1.8s ease-in-out infinite;
+}
+
+@keyframes heartbeat {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(1.12);
+  }
+  45% {
+    transform: scale(1);
+  }
+  60% {
+    transform: scale(1.08);
+  }
+}
+
+/* 头部逐行浮现 */
+.hero > * {
+  animation: fade-up 0.7s ease both;
+}
+
+.hero > *:nth-child(2) {
+  animation-delay: 0.12s;
+}
+
+.hero > *:nth-child(3) {
+  animation-delay: 0.24s;
+}
+
+.hero > *:nth-child(4) {
+  animation-delay: 0.36s;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .names {
@@ -223,6 +353,29 @@ function formatTime(ts) {
   margin-top: 14px;
   font-size: 14px;
   color: var(--ink);
+}
+
+/* ---- 来宾签名 ---- */
+.name-label {
+  display: block;
+  font-size: 14px;
+  color: var(--gold-deep);
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+
+.name-input {
+  width: 100%;
+  padding: 11px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 15px;
+  outline: none;
+}
+
+.name-input:focus {
+  border-color: var(--gold);
 }
 
 /* ---- 选择区 ---- */
@@ -393,12 +546,17 @@ function formatTime(ts) {
   margin-top: 26px;
 }
 
-.owner-link {
+.entry-link {
   font-size: 13px;
   color: var(--ink-light);
   text-decoration: none;
   letter-spacing: 2px;
   border-bottom: 1px solid var(--line);
   padding-bottom: 2px;
+}
+
+.entry-dot {
+  margin: 0 10px;
+  color: var(--ink-light);
 }
 </style>
